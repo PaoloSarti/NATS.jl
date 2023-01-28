@@ -51,7 +51,7 @@ mutable struct NATSClient
     info::NATSInfo
     messages::Channel{MSG}
     commands::Channel{Union{PONG, PUB, SUB, UNSUB}}
-    subscriptions::Dict{String, Vector{Subscription}}
+    subscriptions::Dict{String, Subscription}
     read_loop_task::Union{Task, Nothing}
     write_loop_task::Union{Task, Nothing}
     sid::Int64
@@ -132,14 +132,10 @@ function read_loop(nc::NATSClient)
             readuntil(nc.socket, b"\r\n")
             @debug "Payload read"
             read_payload = false
-            if msg_subject in keys(nc.subscriptions)
-                for subscription in nc.subscriptions[msg_subject]
-                    if subscription.sid == msg_sid
-                        @debug "Push to subscriber channel"
-                        push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
-                        break
-                    end
-                end
+            if msg_sid in keys(nc.subscriptions)
+                subscription = nc.subscriptions[msg_sid]
+                @debug "Push to subscriber channel"
+                push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
             end
         end
     end
@@ -198,13 +194,10 @@ publish(nc::NATSClient, subject::String, payload::String) = publish(nc, subject,
 
 function subscribe(nc::NATSClient, subject::String; queue_group::Union{String, Nothing} = nothing)
     nc.sid += 1
-    subscription = Subscription(nc.sid, subject)
-    if !(subject in keys(nc.subscriptions))
-        nc.subscriptions[subject] = [subscription]
-    else
-        push!(nc.subscriptions[subject], subscription)
-    end
-    push!(nc.commands, SUB(subject, queue_group, "$(nc.sid)"))
+    sid = "$(nc.sid)"
+    subscription = Subscription(sid, subject)
+    nc.subscriptions[sid] = subscription
+    push!(nc.commands, SUB(subject, queue_group, sid))
     return subscription
 end
 
@@ -229,26 +222,12 @@ end
 request(nc::NATSClient, subject::String, payload::String) = request(nc, subject, Vector{UInt8}(payload))
 
 function unsubscribe(nc::NATSClient, subscription::Subscription, max_msgs::Int64 = 0)
-    subs = nc.subscriptions[subscription.subject]
-    
-    found_index = 0
-    for (i, sub) in enumerate(subs)
-        if sub.sid == subscription.sid
-            found_index = i 
-            break
-        end
+    push!(nc.commands, UNSUB(subscription.sid, max_msgs))
+    if max_msgs == 0
+        delete!(nc.subscriptions, subscription.sid)
+        close(subscription.channel)
     end
-    if found_index > 0
-        push!(nc.commands, UNSUB(subscription.sid, max_msgs))
-        if max_msgs == 0
-            deleteat!(subs, found_index)
-            if length(subs) == 0
-                delete!(nc.subscriptions, subscription.subject)
-            end
-            close(subscription.channel)
-        end
-        # TODO: how to close if max_msgs > 0???
-    end
+    # TODO -> how to manage max_msgs > 0
     return nothing
 end
 
