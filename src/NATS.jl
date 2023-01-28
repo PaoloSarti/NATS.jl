@@ -1,6 +1,6 @@
 module NATS
 
-export publish, subscribe, unsubscribe, request, drain
+export publish, subscribe, unsubscribe, request, drain, messages
 
 import Base
 import Random
@@ -55,8 +55,9 @@ mutable struct NATSClient
     read_loop_task::Union{Task, Nothing}
     write_loop_task::Union{Task, Nothing}
     sid::Int64
+    subscriptions_lock::ReentrantLock
 
-    NATSClient(socket::Sockets.TCPSocket, info::NATSInfo) = new(socket, info, Channel{MSG}(Inf), Channel{Union{PONG, PUB, SUB, UNSUB}}(Inf), Dict{String, Vector{Channel{MSG}}}(), nothing, nothing, 0)
+    NATSClient(socket::Sockets.TCPSocket, info::NATSInfo) = new(socket, info, Channel{MSG}(Inf), Channel{Union{PONG, PUB, SUB, UNSUB}}(Inf), Dict{String, Vector{Channel{MSG}}}(), nothing, nothing, 0, ReentrantLock())
 end
 
 function connect(uri::String = "nats://localhost:4222")
@@ -132,10 +133,15 @@ function read_loop(nc::NATSClient)
             readuntil(nc.socket, b"\r\n")
             @debug "Payload read"
             read_payload = false
-            if msg_sid in keys(nc.subscriptions)
-                subscription = nc.subscriptions[msg_sid]
-                @debug "Push to subscriber channel"
-                push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+            try
+                lock(nc.subscriptions_lock)
+                if msg_sid in keys(nc.subscriptions)
+                    subscription = nc.subscriptions[msg_sid]
+                    @debug "Push to subscriber channel"
+                    push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+                end
+            finally
+                unlock(nc.subscriptions_lock)
             end
         end
     end
@@ -196,7 +202,12 @@ function subscribe(nc::NATSClient, subject::String; queue_group::Union{String, N
     nc.sid += 1
     sid = "$(nc.sid)"
     subscription = Subscription(sid, subject)
-    nc.subscriptions[sid] = subscription
+    try
+        lock(nc.subscriptions_lock)
+        nc.subscriptions[sid] = subscription
+    finally
+        unlock(nc.subscriptions_lock)
+    end
     push!(nc.commands, SUB(subject, queue_group, sid))
     return subscription
 end
@@ -224,7 +235,12 @@ request(nc::NATSClient, subject::String, payload::String) = request(nc, subject,
 function unsubscribe(nc::NATSClient, subscription::Subscription, max_msgs::Int64 = 0)
     push!(nc.commands, UNSUB(subscription.sid, max_msgs))
     if max_msgs == 0
-        delete!(nc.subscriptions, subscription.sid)
+        try
+            lock(nc.subscriptions_lock)
+            delete!(nc.subscriptions, subscription.sid)
+        finally
+            unlock(nc.subscriptions_lock)
+        end
         close(subscription.channel)
     end
     # TODO -> how to manage max_msgs > 0
