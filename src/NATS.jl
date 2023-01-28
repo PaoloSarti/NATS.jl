@@ -1,6 +1,6 @@
 module NATS
 
-export publish, subscribe, unsubscribe, drain
+export publish, subscribe, unsubscribe, request, drain
 
 import Base
 import Random
@@ -14,6 +14,7 @@ include("./messages.jl")
 const CR_LF = "\r\n"
 const MSG_RE = r"MSG\s+(?<subject>[^\s]+)\s+(?<sid>[^\s]+)\s+(?<reply_to>([^\s]+)\s+)?(?<bytes>\d+)"
 const ERR_RE = r"-ERR\s+(?<error>.*)"
+const INFO_RE = r"INFO\s+(?<error>.*)"
 
 struct NATSInfo
     server_id::String
@@ -109,10 +110,12 @@ function read_loop(nc::NATSClient)
                 msg_subject = m[:subject]
                 msg_sid = m[:sid]
                 payload_bytes = parse(Int64, m[:bytes])
+                msg_reply_to = m[:reply_to]
                 read_payload = true
                 @debug "Message subject: $msg_subject"
                 @debug "MSG sid: $msg_sid"
                 @debug "Message payload bytes: $payload_bytes"
+                @debug "Message reply_to: $msg_reply_to"
                 continue
             end
             
@@ -120,6 +123,7 @@ function read_loop(nc::NATSClient)
             if m_err !== nothing
                 error = m[:error]
                 @error error
+                continue
             end
         else
             @debug "Read payload"
@@ -130,8 +134,11 @@ function read_loop(nc::NATSClient)
             read_payload = false
             if msg_subject in keys(nc.subscriptions)
                 for subscription in nc.subscriptions[msg_subject]
-                    @debug "Push to subscriber channel"
-                    push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+                    if subscription.sid == msg_sid
+                        @debug "Push to subscriber channel"
+                        push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+                        break
+                    end
                 end
             end
         end
@@ -146,7 +153,7 @@ end
 
 function send(nc::NATSClient, cmd::SUB)
     @debug "Writing SUB"
-    write(nc.socket, "SUB $(cmd.subject) $(cmd.queue_group)")
+    write(nc.socket, "SUB $(cmd.subject)")
     if cmd.queue_group !== nothing
         write(nc.socket, " $(cmd.queue_group)")
     end
@@ -182,14 +189,14 @@ function write_loop(nc::NATSClient)
     end
 end
 
-function publish(nc::NATSClient, subject::String, payload::Vector{UInt8})
-    push!(nc.commands, PUB(subject, "", payload))
+function publish(nc::NATSClient, subject::String, payload::Vector{UInt8}, reply_to::Union{String, Nothing} = nothing)
+    push!(nc.commands, PUB(subject, reply_to, payload))
     return
 end
 
 publish(nc::NATSClient, subject::String, payload::String) = publish(nc, subject, Vector{UInt8}(payload))
 
-function subscribe(nc::NATSClient, subject::String, queue_group::Union{String, Nothing} = nothing)
+function subscribe(nc::NATSClient, subject::String; queue_group::Union{String, Nothing} = nothing)
     nc.sid += 1
     subscription = Subscription(nc.sid, subject)
     if !(subject in keys(nc.subscriptions))
@@ -201,14 +208,25 @@ function subscribe(nc::NATSClient, subject::String, queue_group::Union{String, N
     return subscription
 end
 
-function subscribe(nc::NATSClient, subject::String, cb::Function)
-    subscription = subscribe(nc, subject)
+function subscribe(nc::NATSClient, subject::String, cb::Function; queue_group::Union{String, Nothing} = nothing)
+    subscription = subscribe(nc, subject, queue_group=queue_group)
     task = @async for message in subscription.channel
         cb(message)
     end
     subscription.task = task
     return subscription
 end
+
+function request(nc::NATSClient, subject::String, payload::Vector{UInt8})
+    reply_to = Random.randstring(22)
+    sub = subscribe(nc, reply_to)
+    publish(nc, subject, payload, reply_to)
+    response = take!(messages(sub))
+    unsubscribe(nc, sub)
+    return response
+end
+
+request(nc::NATSClient, subject::String, payload::String) = request(nc, subject, Vector{UInt8}(payload))
 
 function unsubscribe(nc::NATSClient, subscription::Subscription, max_msgs::Int64 = 0)
     subs = nc.subscriptions[subscription.subject]
