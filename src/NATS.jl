@@ -1,7 +1,9 @@
 module NATS
 
-export publish, subscribe, drain
+export publish, subscribe, unsubscribe, drain
 
+import Base
+import Random
 import Sockets
 using URIs: URI
 import JSON3 as JSON
@@ -40,6 +42,8 @@ mutable struct Subscription
     Subscription(sid::String, subject::String) = new(sid, subject, Channel{MSG}(Inf), nothing)
     Subscription(sid::Int64, subject::String) = Subscription("$(sid)", subject)
 end
+
+messages(subscription::Subscription) = subscription.channel
 
 mutable struct NATSClient
     socket::Sockets.TCPSocket
@@ -218,12 +222,14 @@ function unsubscribe(nc::NATSClient, subscription::Subscription, max_msgs::Int64
     end
     if found_index > 0
         push!(nc.commands, UNSUB(subscription.sid, max_msgs))
-        #=
-        deleteat!(subs, found_index)
-        if length(subs) == 0
-            delete!(nc.subscriptions, subscription.subject)
+        if max_msgs == 0
+            deleteat!(subs, found_index)
+            if length(subs) == 0
+                delete!(nc.subscriptions, subscription.subject)
+            end
+            close(subscription.channel)
         end
-        =#
+        # TODO: how to close if max_msgs > 0???
     end
     return nothing
 end

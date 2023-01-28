@@ -1,0 +1,8 @@
+- iterate subscription
+- request
+- tests!
+- queue_group
+- messages with headers
+- better handling of unsubscriptions and drain
+- multiple servers
+- pretty print NATSClient
