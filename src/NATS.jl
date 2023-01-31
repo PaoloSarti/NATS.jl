@@ -1,6 +1,6 @@
 module NATS
 
-export publish, subscribe, unsubscribe, request, drain, messages
+export publish, subscribe, unsubscribe, request, drain
 
 import Base
 import Random
@@ -39,12 +39,21 @@ mutable struct Subscription
     subject::String
     channel::Channel{MSG}
     task::Union{Task, Nothing}
+    max_msgs::Float64
 
-    Subscription(sid::String, subject::String) = new(sid, subject, Channel{MSG}(Inf), nothing)
+    Subscription(sid::String, subject::String) = new(sid, subject, Channel{MSG}(Inf), nothing, Inf)
     Subscription(sid::Int64, subject::String) = Subscription("$(sid)", subject)
 end
 
-messages(subscription::Subscription) = subscription.channel
+function Base.iterate(s::Subscription, state=nothing)
+    if s.max_msgs > 0
+        s.max_msgs -= 1
+        return iterate(s.channel, state)
+    else
+        close(s.channel)
+        return nothing
+    end
+end
 
 mutable struct NATSClient
     socket::Sockets.TCPSocket
@@ -225,7 +234,7 @@ function request(nc::NATSClient, subject::String, payload::Vector{UInt8})
     reply_to = Random.randstring(22)
     sub = subscribe(nc, reply_to)
     publish(nc, subject, payload, reply_to)
-    response = take!(messages(sub))
+    response = take!(sub.channel)
     unsubscribe(nc, sub)
     return response
 end
@@ -242,8 +251,9 @@ function unsubscribe(nc::NATSClient, subscription::Subscription, max_msgs::Int64
             unlock(nc.subscriptions_lock)
         end
         close(subscription.channel)
+    else
+        subscription.max_msgs = max_msgs
     end
-    # TODO -> how to manage max_msgs > 0
     return nothing
 end
 

@@ -1,3 +1,4 @@
+- connection options
 - iterate subscription
 - request
 - tests!
