@@ -45,15 +45,7 @@ mutable struct Subscription
     Subscription(sid::Int64, subject::String) = Subscription("$(sid)", subject)
 end
 
-function Base.iterate(s::Subscription, state=nothing)
-    if s.max_msgs > 0
-        s.max_msgs -= 1
-        return iterate(s.channel, state)
-    else
-        close(s.channel)
-        return nothing
-    end
-end
+Base.iterate(s::Subscription, state=nothing) = iterate(s.channel, state)
 
 mutable struct NATSClient
     socket::Sockets.TCPSocket
