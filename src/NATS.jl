@@ -1,6 +1,6 @@
 module NATS
 
-export publish, subscribe, unsubscribe, request, drain
+export publish, subscribe, unsubscribe, request, drain, CONNECT
 
 import Base
 import Random
@@ -59,17 +59,17 @@ mutable struct NATSClient
     socket::Sockets.TCPSocket
     info::NATSInfo
     messages::Channel{MSG}
-    commands::Channel{Union{PONG, PUB, SUB, UNSUB}}
+    commands::Channel{Union{CONNECT, PONG, PUB, SUB, UNSUB}}
     subscriptions::Dict{String, Subscription}
     read_loop_task::Union{Task, Nothing}
     write_loop_task::Union{Task, Nothing}
     sid::Int64
     subscriptions_lock::ReentrantLock
 
-    NATSClient(socket::Sockets.TCPSocket, info::NATSInfo) = new(socket, info, Channel{MSG}(Inf), Channel{Union{PONG, PUB, SUB, UNSUB}}(Inf), Dict{String, Vector{Channel{MSG}}}(), nothing, nothing, 0, ReentrantLock())
+    NATSClient(socket::Sockets.TCPSocket, info::NATSInfo) = new(socket, info, Channel{MSG}(Inf), Channel{Union{CONNECT, PONG, PUB, SUB, UNSUB}}(Inf), Dict{String, Vector{Channel{MSG}}}(), nothing, nothing, 0, ReentrantLock())
 end
 
-function connect(uri::String = "nats://localhost:4222")
+function connect(uri::String = "nats://localhost:4222", connectOptions::ConnectOptions = ConnectOptions())
     u = URI(uri)
     socket = Sockets.connect(u.host, parse(Int64, u.port))
     data = readuntil(socket, CR_LF)
@@ -82,6 +82,8 @@ function connect(uri::String = "nats://localhost:4222")
     info = JSON.read(payload, NATSInfo)
 
     nc = NATSClient(socket, info)
+
+    push!(nc.commands, CONNECT(connectOptions))
 
     nc.read_loop_task = @async read_loop(nc)
     nc.write_loop_task = @async write_loop(nc)
@@ -146,8 +148,15 @@ function read_loop(nc::NATSClient)
                 lock(nc.subscriptions_lock)
                 if msg_sid in keys(nc.subscriptions)
                     subscription = nc.subscriptions[msg_sid]
-                    @debug "Push to subscriber channel"
-                    push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+                    if subscription.max_msgs > 0
+                        @debug "Push to subscriber channel"
+                        push!(subscription.channel, MSG(msg_subject, msg_sid, msg_reply_to, data))
+                        subscription.max_msgs -= 1
+                    else
+                        @debug "Subscription drained! Closing it..."
+                        close(subscription.channel)
+                        delete!(nc.subscriptions, msg_sid)
+                    end
                 end
             finally
                 unlock(nc.subscriptions_lock)
@@ -156,10 +165,18 @@ function read_loop(nc::NATSClient)
     end
 end
 
+function send(nc::NATSClient, conn::CONNECT)
+    @debug "Writing CONNECT"
+    write(nc.socket, b"CONNECT ")
+    write(nc.socket, JSON.write(conn.options))
+    write(nc.socket, CR_LF)
+    @debug "Sent CONNECT"
+end
+
 function send(nc::NATSClient, ::PONG)
     @debug "Writing PONG"
     write(nc.socket, "PONG\r\n")
-    @debug "Sent Pong"
+    @debug "Sent PONG"
 end
 
 function send(nc::NATSClient, cmd::SUB)

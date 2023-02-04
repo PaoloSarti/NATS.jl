@@ -1,3 +1,29 @@
+import Base
+import StructTypes
+
+Base.@kwdef mutable struct ConnectOptions
+    verbose::Bool = false
+    pedantic::Bool = false
+    tls_required::Bool = false
+    auth_token::Union{String, Nothing} = nothing
+    user::Union{String, Nothing} = nothing
+    pass::Union{String, Nothing} = nothing
+    name::Union{String, Nothing} = nothing
+    lang::Union{String, Nothing} = "Julia"
+    version::Union{String, Nothing} = "0.1.0"
+    protocol::Int64 = 0
+    echo::Bool = true
+    sig::Union{String, Nothing} = nothing
+    jwt::Union{String, Nothing} = nothing
+    no_responders::Bool = false
+end
+
+StructTypes.StructType(::Type{ConnectOptions}) = StructTypes.Struct()
+
+
+struct CONNECT
+    options::ConnectOptions
+end
 
 struct SUB
     subject::String
