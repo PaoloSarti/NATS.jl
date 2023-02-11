@@ -31,6 +31,7 @@ StructTypes.StructType(::Type{NATSInfo}) = StructTypes.Struct()
 
 mutable struct NATSConnection
     uri::String
+    options::ConnectOptions
     socket::Sockets.TCPSocket
     info::NATSInfo
     commands::Channel{Union{CONNECT, PONG, PUB, SUB, UNSUB}}
@@ -39,15 +40,19 @@ mutable struct NATSConnection
     read_loop_task::Union{Task, Nothing}
     write_loop_task::Union{Task, Nothing}
     dispatch_commands_task::Union{Task, Nothing}
+    reconnections::Int64
+    status::Symbol
 
     NATSConnection(
         uri::String,
+        options::ConnectOptions,
         socket::Sockets.TCPSocket,
         info::NATSInfo,
         messages::Channel{MSG},
         client_commands::Channel{Union{PUB, SUB, UNSUB}},
     ) = new(
         uri,
+        options,
         socket,
         info,
         Channel{Union{CONNECT, PONG, PUB, SUB, UNSUB}}(Inf),
@@ -56,6 +61,8 @@ mutable struct NATSConnection
         nothing,
         nothing,
         nothing,
+        0,
+        :connected,
     )
 end
 
@@ -76,7 +83,7 @@ function connect_to_server(
 
     info = JSON.read(payload, NATSInfo)
 
-    nc = NATSConnection(uri, socket, info, messages, client_commands)
+    nc = NATSConnection(uri, options, socket, info, messages, client_commands)
 
     push!(nc.commands, CONNECT(options))
 
@@ -96,11 +103,18 @@ function read_loop(nc::NATSConnection)
 
     while true
         if !isopen(nc.socket)
+            nc.status = :disconnected
             @debug "Socket closed"
             break
         end
         if !read_payload
             data = readuntil(nc.socket, b"\r\n")
+
+            if length(data) == 0
+                @debug "Read empty data from socket, close it"
+                close(nc.socket)
+                nc.status = :disconnected
+            end
 
             if data == b"PING"
                 @debug "Pinged"
@@ -145,6 +159,7 @@ function read_loop(nc::NATSConnection)
             read_payload = false
             push!(nc.messages, MSG(msg_subject, msg_sid, msg_reply_to, data))
         end
+        @debug "Read loop cycle done"
     end
 end
 
@@ -196,19 +211,53 @@ end
 
 function dispatch_commands(nc::NATSConnection)
     for command in nc.client_commands
-        push!(nc.commands, command)
+        if isopen(nc.socket)
+            push!(nc.commands, command)
+        else
+            push!(nc.client_commands, command)
+            break
+        end
     end
-    return close(nc.commands)
+    close(nc.commands)
+    @debug "Dispatch commands ended"
 end
 
 function write_loop(nc::NATSConnection)
     for command in nc.commands
-        send(nc, command)
+        if isopen(nc.socket)
+            send(nc, command)
+        else
+            push!(nc.client_commands, command)
+            break
+        end
     end
+    @debug "Write loop ended"
 end
 
 function drain(nc::NATSConnection; timeout = 10)
     timedwait(() -> !isready(nc.commands), timeout)
     close(nc.socket)
+    return nothing
+end
+
+function reconnect(nc::NATSConnection)
+    u = URI(nc.uri)
+    nc.socket = Sockets.connect(u.host, parse(Int64, u.port))
+    data = readuntil(nc.socket, CR_LF)
+    cmd, payload = split(data, " ", limit = 2)
+
+    if cmd != "INFO"
+        error("Received wrong command from NATS!")
+    end
+
+    nc.info = JSON.read(payload, NATSInfo)
+
+    push!(nc.commands, CONNECT(nc.options))
+
+    nc.read_loop_task = errormonitor(@async read_loop(nc))
+    nc.write_loop_task = errormonitor(@async write_loop(nc))
+    nc.dispatch_commands_task = errormonitor(@async dispatch_commands(nc))
+    nc.reconnections += 1
+    nc.status = :connected
     return nothing
 end
