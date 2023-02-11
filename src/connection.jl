@@ -66,6 +66,10 @@ mutable struct NATSConnection
     )
 end
 
+function Base.show(io::IO, nc::NATSConnection)
+    return write(io, "NATSConnection(\"$(nc.uri)\", $(nc.status)\")")
+end
+
 function connect_to_server(
     messages::Channel{MSG},
     client_commands::Channel{Union{PUB, SUB, UNSUB}},

@@ -1,5 +1,4 @@
 # NATS.jl
-
 Unofficial client to NATS.
 
 ## Usage
@@ -69,6 +68,28 @@ t = @async Threads.foreach(x -> println("ID: $(Threads.threadid()) - $x"), chann
 for i = 1:100
     publish(nc, subject, "m: $i")
 end
+
+drain(nc)
+```
+
+### Handle requests in multiple threads
+
+```julia
+using NATS
+
+nc = NATS.connect()
+subject = "hello"
+sub = subscribe(nc, subject)
+
+function handle_request(msg)
+    println("Thread: $(Threads.threadid()): arrived: $msg")
+    return publish(nc, msg.reply_to, msg.payload)
+end
+
+t = @async Threads.foreach(handle_request, channel(sub))
+
+# Launch requests in parallel to see that it uses multiple threads in the consumer
+results = asyncmap(x -> request(nc, subject, "hey"), 1:100)
 
 drain(nc)
 ```
