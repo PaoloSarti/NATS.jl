@@ -2,6 +2,7 @@
 - tests!
 - queue_group
 - better error handling
+- handle reconnections
 - messages with headers
 - better handling of unsubscriptions and drain
 - multiple servers
