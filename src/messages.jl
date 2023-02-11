@@ -20,7 +20,6 @@ end
 
 StructTypes.StructType(::Type{ConnectOptions}) = StructTypes.Struct()
 
-
 struct CONNECT
     options::ConnectOptions
 end
@@ -41,6 +40,17 @@ struct MSG
     sid::String
     reply_to::Union{String, Nothing}
     payload::Vector{UInt8}
+end
+
+string_payload(msg::MSG) = String(copy(msg.payload))
+
+function Base.show(io::IO, msg::MSG)
+    string_msg = string_payload(msg)
+    if length(string_msg) > 50
+        write(io, "MSG($(msg.subject), $(msg.sid), \"$(first(string_msg, 50))...\")")
+    else
+        write(io, "MSG($(msg.subject), $(msg.sid), \"$string_msg\")")
+    end
 end
 
 struct PUB

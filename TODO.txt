@@ -1,8 +1,11 @@
 - connection options
 - tests!
 - queue_group
+- better error handling
 - messages with headers
 - better handling of unsubscriptions and drain
 - multiple servers
 - cluster reconfiguration
 - pretty print NATSClient
+- run(`docker run -d --rm --name nats-main -p 4222:4222 -p 6222:6222 -p 8222:8222 nats:2.9.14`)
+- timed request
