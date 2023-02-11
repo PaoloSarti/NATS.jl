@@ -144,17 +144,27 @@ function subscribe(
     return subscription
 end
 
-function request(nc::NATSClient, subject::String, payload::Vector{UInt8})
+function request(
+    nc::NATSClient,
+    subject::String,
+    payload::Vector{UInt8};
+    timeout = 10,
+    pollint = 0.1,
+)
     reply_to = Random.randstring(22)
     sub = subscribe(nc, reply_to)
     publish(nc, subject, payload, reply_to)
+    wait_result = timedwait(() -> isready(sub.channel), timeout; pollint = pollint)
+    if wait_result == :timed_out
+        error("Timed out!")
+    end
     response = take!(sub.channel)
     unsubscribe(nc, sub)
     return response
 end
 
-request(nc::NATSClient, subject::String, payload::String) =
-    request(nc, subject, Vector{UInt8}(payload))
+request(nc::NATSClient, subject::String, payload::String; timeout = 10, pollint = 0.1) =
+    request(nc, subject, Vector{UInt8}(payload); timeout = timeout, pollint = pollint)
 
 function unsubscribe(nc::NATSClient, subscription::Subscription; max_msgs::Int64 = 0)
     push!(nc.commands, UNSUB(subscription.sid, max_msgs))

@@ -57,6 +57,7 @@ drain(nc)
 ```
 
 ### Consume subscription in multiple threads
+
 ```julia
 using NATS
 
@@ -65,7 +66,7 @@ subject = "hello"
 sub = subscribe(nc, subject)
 t = @async Threads.foreach(x -> println("ID: $(Threads.threadid()) - $x"), channel(sub))
 
-for i in 1:100
+for i = 1:100
     publish(nc, subject, "m: $i")
 end
 
