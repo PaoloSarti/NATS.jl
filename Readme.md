@@ -1,5 +1,11 @@
 # NATS.jl
-Unofficial client to NATS.
+Unofficial client to NATS in Julia
+
+## Supports
+- publish-subscribe
+- request-reply
+- connect to multiple nats servers in a cluster
+- channel-based non-blocking interaction
 
 ## Usage
 
@@ -18,6 +24,7 @@ sub_task = @async for msg in sub
 end
 
 publish(nc, subject, "hi!")
+
 drain(nc)
 ```
 
@@ -93,3 +100,9 @@ results = asyncmap(x -> request(nc, subject, "hey"), 1:100)
 
 drain(nc)
 ```
+
+## Missing features
+- support for messages with headers
+- handle reconnections
+- handle info message from servers for cluster reconfiguration
+- JetStream
