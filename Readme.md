@@ -1,11 +1,13 @@
 # NATS.jl
+
 Unofficial client to NATS in Julia
 
 ## Supports
-- publish-subscribe
-- request-reply
-- connect to multiple nats servers in a cluster
-- channel-based non-blocking interaction
+
+  - publish-subscribe
+  - request-reply
+  - connect to multiple nats servers in a cluster
+  - channel-based non-blocking interaction
 
 ## Usage
 
@@ -102,7 +104,8 @@ drain(nc)
 ```
 
 ## Missing features
-- support for messages with headers
-- handle reconnections
-- handle info message from servers for cluster reconfiguration
-- JetStream
+
+  - support for messages with headers
+  - handle reconnections
+  - handle info message from servers for cluster reconfiguration
+  - JetStream
