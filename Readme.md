@@ -1,4 +1,5 @@
 # NATS.jl
+
 ![Build Status](https://github.com/PaoloSarti/NATS.jl/actions/workflows/test.yaml/badge.svg)
 
 Unofficial client to NATS in Julia
