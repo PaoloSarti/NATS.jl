@@ -9,6 +9,10 @@ import Random
 include("./messages.jl")
 include("./connection.jl")
 
+"""
+struct that represents a subscription to a subject, it will keep the Channel of relevant messages.
+Get this struct by using the subscribe function.
+"""
 mutable struct Subscription
     sid::String
     subject::String
@@ -25,8 +29,15 @@ Base.iterate(s::Subscription, state = nothing) = iterate(s.channel, state)
 
 Base.IteratorSize(::Type{Subscription}) = Base.SizeUnknown()
 
+"""
+Return the Channel of Messages from the subscription
+"""
 channel(sub::Subscription) = sub.channel
 
+"""
+This is the main object of the module, that represents a set of connections to a NATS cluster.
+It keeps the commands and messages in Channels and uses tasks to dispatch the messages from the single NATSConnections to the subscribers.
+"""
 mutable struct NATSClient
     commands::Channel{Union{PUB, SUB, UNSUB}}
     messages::Channel{MSG}
@@ -56,6 +67,10 @@ function Base.show(io::IO, nc::NATSClient)
     return write(io, "NATSClient($(uris))")
 end
 
+"""
+Connect to a NATS cluster, accepts a vector of uris, and optionally a ConnectOptions
+struct, returns a NATSClient
+"""
 function connect(
     uris::Vector{String} = ["nats://localhost:4222"];
     options::ConnectOptions = ConnectOptions(),
@@ -99,6 +114,10 @@ function messages_to_subscribers(nc::NATSClient)
     end
 end
 
+"""
+Publish a message to a subject, the payload is raw bytes. Optionally specify a 
+reply_to subject to implement request/response
+"""
 function publish(
     nc::NATSClient,
     subject::String,
@@ -109,9 +128,15 @@ function publish(
     return
 end
 
+"""
+Publish a string message to a subject
+"""
 publish(nc::NATSClient, subject::String, payload::String) =
     publish(nc, subject, Vector{UInt8}(payload))
 
+"""
+Subscribe to a subject, optionally specify a queue_group. Returns a Subscription
+"""
 function subscribe(
     nc::NATSClient,
     subject::String;
@@ -130,6 +155,14 @@ function subscribe(
     return subscription
 end
 
+"""
+Subscribe to a subject, and directly register a callback on the subscription 
+that will consume the subscription message in a dedicated task.
+
+For more control on the execution, don't pass the callback and explicitely consume the messages.
+
+Returns a Subscription
+"""
 function subscribe(
     nc::NATSClient,
     subject::String,
@@ -144,6 +177,15 @@ function subscribe(
     return subscription
 end
 
+"""
+Request a Response by publishing a message to a subject and waiting until the timeout for the response to arrive.
+
+
+This method will also unsubscribe to the reply_to subscription created internally.
+
+
+Returns the Response or throws an error in case of timeout.
+"""
 function request(
     nc::NATSClient,
     subject::String,
@@ -156,6 +198,7 @@ function request(
     publish(nc, subject, payload, reply_to)
     wait_result = timedwait(() -> isready(sub.channel), timeout; pollint = pollint)
     if wait_result == :timed_out
+        unsubscribe(nc, sub)
         error("Timed out!")
     end
     response = take!(sub.channel)
@@ -163,9 +206,17 @@ function request(
     return response
 end
 
+"""
+Request a Response by publishing a string message to a subject and waiting until the timeout for the response to arrive.
+
+Returns the response Message or throws in case of timeout
+"""
 request(nc::NATSClient, subject::String, payload::String; timeout = 10, pollint = 0.1) =
     request(nc, subject, Vector{UInt8}(payload); timeout = timeout, pollint = pollint)
 
+"""
+Unsubscribe from a subscription. If max_msgs is specified, the subscription won't be closed immediately but only after that number of messages.
+"""
 function unsubscribe(nc::NATSClient, subscription::Subscription; max_msgs::Int64 = 0)
     push!(nc.commands, UNSUB(subscription.sid, max_msgs))
     if max_msgs == 0
@@ -182,6 +233,9 @@ function unsubscribe(nc::NATSClient, subscription::Subscription; max_msgs::Int64
     return nothing
 end
 
+"""
+Drain the connection by unsubscribing to all the subscriptions, and closing the connections.
+"""
 function drain(nc::NATSClient; timeout = 10)
     subs = collect(values(nc.subscriptions))
     for sub in subs
