@@ -1,7 +1,6 @@
 module NATS
 
-export publish,
-    subscribe, unsubscribe, request, drain, string_payload, channel, ConnectOptions
+export publish, subscribe, unsubscribe, request, drain, string_payload, channel
 
 import Base
 import Random
