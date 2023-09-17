@@ -1,4 +1,4 @@
-name: Julia Package Test
+name: Test
 
 on:
   push:
