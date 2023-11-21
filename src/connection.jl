@@ -15,7 +15,7 @@ struct NATSInfo
     server_name::String
     version::String
     proto::Int64
-    git_commit::String
+    git_commit::Union{String, Nothing}
     go::String
     host::String
     port::Int64
